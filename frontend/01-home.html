@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>首页 - 校园二手交易</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+
+    <header class="header">
+        <span class="header-title">校园二手</span>
+    </header>
+
+    <div class="main-content">
+        <div class="banner-section">
+            <div class="banner-carousel" id="bannerContainer">
+                <div class="banner-placeholder">🛒</div>
+            </div>
+        </div>
+        <div class="search-bar">
+            <div class="search-input-wrap">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="homeSearchInput" placeholder="搜索你想买的宝贝...">
+            </div>
+            <button class="search-btn" id="searchBtn">搜索</button>
+        </div>
+        <div class="product-list">
+            <div class="section-title">🔥 热门推荐</div>
+            <div id="hotProductList">
+                <div class="loading"><div class="spinner"></div>加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <nav class="tab-bar">
+        <button class="tab-item active"><span class="tab-icon">🏠</span><span>首页</span></button>
+        <button class="tab-item"><span class="tab-icon">📂</span><span>分类</span></button>
+        <button class="tab-item"><span class="tab-icon tab-badge" id="cartBadge">🛒</span><span>购物车</span></button>
+        <button class="tab-item"><span class="tab-icon">👤</span><span>我的</span></button>
+    </nav>
+
+    <script src="common.js"></script>
+    <script>
+const state = { banners: [], bannerIndex: 0, bannerTimer: null };
+
+async function loadHome() {
+    $('#homeSearchInput').value = '';
+    try {
+        state.banners = await HomeAPI.banners();
+        renderBanners();
+        if (state.banners.length > 1) startBannerAuto();
+    } catch (e) {
+        $('#bannerContainer').innerHTML = '<div class="banner-placeholder">🛒</div>';
+    }
+    try {
+        const products = await HomeAPI.hot();
+        renderProducts(products);
+    } catch (e) {
+        $('#hotProductList').innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">热门商品加载失败</div></div>';
+    }
+}
+
+function renderBanners() {
+    const c = $('#bannerContainer');
+    if (!state.banners.length) { c.innerHTML = '<div class="banner-placeholder">🛒</div>'; return; }
+    let h = '';
+    state.banners.forEach((b, i) => {
+        h += `<div class="banner-slide${i===0?' active':''}"><img src="${esc(b.imageUrl)}" onerror="this.parentElement.innerHTML='<div class=banner-placeholder>🎨</div>'" alt=""></div>`;
+    });
+    h += '<div class="banner-dots">';
+    state.banners.forEach((_, i) => { h += `<div class="banner-dot${i===0?' active':''}"></div>`; });
+    h += '</div>';
+    c.innerHTML = h;
+}
+
+function startBannerAuto() {
+    clearInterval(state.bannerTimer);
+    state.bannerTimer = setInterval(() => {
+        state.bannerIndex = (state.bannerIndex + 1) % state.banners.length;
+        $$('.banner-slide').forEach((s, i) => s.classList.toggle('active', i === state.bannerIndex));
+        $$('.banner-dot').forEach((d, i) => d.classList.toggle('active', i === state.bannerIndex));
+    }, 3000);
+}
+
+function renderProducts(products) {
+    const c = $('#hotProductList');
+    if (!products || !products.length) { c.innerHTML = '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">暂无商品</div></div>'; return; }
+    c.innerHTML = products.map(p => {
+        const img = getFirstImage(p.images);
+        return `<div class="product-card" data-id="${p.id}">
+            ${img?`<img class="product-image" src="${esc(img)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="">`:''}
+            ${!img?'<div class="product-image-placeholder">📦</div>':'<div class="product-image-placeholder" style="display:none">📦</div>'}
+            <div class="product-info"><div class="product-title">${esc(p.title)}</div><div class="product-desc">${esc(p.description||'')}</div>
+            <div class="product-bottom"><span><span class="product-price"><span class="unit">¥</span>${fmt(p.price)}</span>${p.originalPrice?`<span class="product-original">¥${fmt(p.originalPrice)}</span>`:''}</span><span class="product-meta">👁 ${p.viewCount||0}</span></div></div>
+        </div>`;
+    }).join('');
+    bindProductClicks();
+}
+
+function doSearch() {
+    const kw = $('#homeSearchInput').value.trim();
+    if (!kw) { showToast('请输入搜索关键词'); return; }
+    HomeAPI.search(kw, 1, 10).then(r => {
+        let h = `<div style="padding:10px 16px;font-size:13px;color:var(--text-muted)">搜索"${esc(kw)}"，共 ${r.total} 条结果</div>`;
+        h += r.records.map(p => `<div class="product-card" data-id="${p.id}">${getFirstImage(p.images)?`<img class="product-image" src="${esc(getFirstImage(p.images))}" onerror="this.style.display='none'" alt="">`:''}<div class="product-info"><div class="product-title">${esc(p.title)}</div><div class="product-bottom"><span class="product-price"><span class="unit">¥</span>${fmt(p.price)}</span></div></div></div>`).join('');
+        $('#hotProductList').innerHTML = h;
+        bindProductClicks();
+    }).catch(e => { $('#hotProductList').innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">${esc(e.message)}</div></div>`; });
+}
+
+$('#searchBtn').addEventListener('click', doSearch);
+$('#homeSearchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+loadHome();
+</script>
+</body>
+</html>
