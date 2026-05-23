@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>分类 - 校园二手交易</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+
+    <header class="header">
+        <span class="header-title">商品分类</span>
+    </header>
+
+    <div class="main-content">
+        <!-- 分类入口 -->
+        <div class="category-section">
+            <div class="section-title">📂 全部分类</div>
+            <div class="category-grid" id="categoryGrid">
+                <div class="loading"><div class="spinner"></div>加载中...</div>
+            </div>
+        </div>
+        <!-- 分类商品列表 -->
+        <div class="product-list" id="categoryProductList">
+            <div class="empty-state"><div class="empty-icon">👆</div><div class="empty-text">请选择分类查看商品</div></div>
+        </div>
+    </div>
+
+    <nav class="tab-bar">
+        <button class="tab-item" data-tab="home"><span class="tab-icon">🏠</span><span>首页</span></button>
+        <button class="tab-item active" data-tab="category"><span class="tab-icon">📂</span><span>分类</span></button>
+        <button class="tab-item" data-tab="cart"><span class="tab-icon tab-badge" id="cartBadge">🛒</span><span>购物车</span></button>
+        <button class="tab-item" data-tab="mine"><span class="tab-icon">👤</span><span>我的</span></button>
+    </nav>
+
+    <script src="common.js"></script>
+    <script>
+// ==================== 分类模块 ====================
+let currentCategoryId = null, currentPage = 1;
+
+async function loadCategories() {
+    try {
+        const categories = await CategoryAPI.list();
+        let html = '';
+        categories.forEach(c => {
+            html += `<button class="category-item" data-id="${c.id}" data-name="${esc(c.name)}">
+                <span class="category-icon">${c.icon || '📦'}</span>
+                <span class="category-name">${esc(c.name)}</span>
+            </button>`;
+        });
+        $('#categoryGrid').innerHTML = html;
+        $$('#categoryGrid .category-item').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentCategoryId = Number(btn.dataset.id);
+                currentPage = 1;
+                $('.header-title').textContent = btn.dataset.name;
+                loadProducts(currentCategoryId, 1);
+            });
+        });
+    } catch (e) {
+        showToast('分类加载失败: ' + e.message, 'error');
+    }
+}
+
+async function loadProducts(catId, page) {
+    try {
+        const result = await CategoryAPI.products(catId, page, 10);
+        let html = result.records.length ? result.records.map(p => {
+            const img = getFirstImage(p.images);
+            const imgHtml = img ? `<img class="product-image" src="${esc(img)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="">` : '';
+            const plHtml = !img ? '<div class="product-image-placeholder">📦</div>' : '<div class="product-image-placeholder" style="display:none">📦</div>';
+            const origHtml = p.originalPrice ? `<span class="product-original">¥${fmt(p.originalPrice)}</span>` : '';
+            return `<div class="product-card" data-id="${p.id}">${imgHtml}${plHtml}<div class="product-info"><div class="product-title">${esc(p.title)}</div><div class="product-desc">${esc(p.description||'')}</div><div class="product-bottom"><span><span class="product-price"><span class="unit">¥</span>${fmt(p.price)}</span>${origHtml}</span><span class="product-meta">👁 ${p.viewCount||0}</span></div></div></div>`;
+        }).join('') : '';
+        if (result.total > result.size) {
+            const totalPages = Math.ceil(result.total / result.size);
+            html += `<div class="pagination">
+                <button onclick="goPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>上一页</button>
+                <span class="page-info">${page} / ${totalPages}</span>
+                <button onclick="goPage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}>下一页</button>
+            </div>`;
+        }
+        $('#categoryProductList').innerHTML = html || '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">该分类暂无商品</div></div>';
+        bindProductClicks();
+        currentPage = page;
+    } catch (e) {
+        $('#categoryProductList').innerHTML = `<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-text">${esc(e.message)}</div></div>`;
+    }
+}
+
+function goPage(page) { loadProducts(currentCategoryId, page); }
+
+$('.tab-item').forEach(t => t.addEventListener('click', () => { showToast('请看其他模块文件'); }));
+
+loadCategories();
+</script>
+</body>
+</html>
