@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>我的 - 校园二手交易</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+
+    <header class="header">
+        <span class="header-title">我的</span>
+    </header>
+
+    <div class="main-content">
+        <div id="mineContent">
+            <div class="loading"><div class="spinner"></div>加载中...</div>
+        </div>
+    </div>
+
+    <nav class="tab-bar">
+        <button class="tab-item" data-tab="home"><span class="tab-icon">🏠</span><span>首页</span></button>
+        <button class="tab-item" data-tab="category"><span class="tab-icon">📂</span><span>分类</span></button>
+        <button class="tab-item" data-tab="cart"><span class="tab-icon tab-badge" id="cartBadge">🛒</span><span>购物车</span></button>
+        <button class="tab-item active" data-tab="mine"><span class="tab-icon">👤</span><span>我的</span></button>
+    </nav>
+
+    <script src="common.js"></script>
+    <script>
+// ==================== 我的模块 ====================
+let orderStatus = null, orderPage = 1, publishedPage = 1;
+
+function init() {
+    if (!isLoggedIn()) {
+        $('#mineContent').innerHTML = `<div class="login-prompt"><div class="icon">👤</div><div style="color:var(--text-secondary)">请先登录以使用完整功能</div><button class="btn btn-primary" onclick="showLoginModal(init)">去登录</button></div>`;
+        return;
+    }
+    loadProfile();
+}
+
+async function loadProfile() {
+    try {
+        const user = await UserAPI.info();
+        renderProfile(user);
+    } catch (e) { showToast('获取用户信息失败: ' + e.message, 'error'); }
+}
+
+function renderProfile(user) {
+    const avatarHtml = user.avatar ? `<img src="${esc(user.avatar)}" alt="">` : '👤';
+    $('#mineContent').innerHTML = `
+    <div class="profile-header">
+        <div class="profile-avatar">${avatarHtml}</div>
+        <div><div class="profile-name">${esc(user.nickname || '未设置昵称')}</div><div class="profile-school">${esc(user.school || '未设置学校')}</div></div>
+        <button class="profile-edit" onclick="showEditProfile()">编辑资料</button>
+    </div>
+    <div class="menu-section">
+        <button class="menu-item" onclick="showPublished()"><span class="menu-icon">📦</span> 我的发布<span class="menu-arrow">›</span></button>
+        <button class="menu-item" onclick="showPublishForm()"><span class="menu-icon">➕</span> 发布闲置<span class="menu-arrow">›</span></button>
+        <button class="menu-item" onclick="showOrders()"><span class="menu-icon">📋</span> 我的订单<span class="menu-arrow">›</span></button>
+        <button class="menu-item" onclick="doLogout()"><span class="menu-icon">🚪</span> 退出登录<span class="menu-arrow">›</span></button>
+    </div>
+    <div id="mineSubContent"></div>`;
+}
+
+// ========== 编辑资料 ==========
+function showEditProfile() {
+    UserAPI.info().then(user => {
+        removeModal();
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.onclick = e => { if (e.target === overlay) removeModal(); };
+        overlay.innerHTML = `
+        <div class="modal-sheet" onclick="event.stopPropagation()">
+            <div class="modal-handle"></div>
+            <div class="modal-header"><span style="font-weight:600">编辑资料</span><button class="modal-close" onclick="removeModal()">✕</button></div>
+            <div class="modal-body">
+                <div class="form-group"><label class="form-label">昵称</label><input class="form-input" id="eNickname" value="${esc(user.nickname||'')}" placeholder="请输入昵称"></div>
+                <div class="form-group"><label class="form-label">手机号</label><input class="form-input" id="ePhone" value="${esc(user.phone||'')}" placeholder="请输入手机号"></div>
+                <div class="form-group"><label class="form-label">学校</label><input class="form-input" id="eSchool" value="${esc(user.school||'')}" placeholder="请输入学校名称"></div>
+                <div class="form-group"><label class="form-label">头像URL</label><input class="form-input" id="eAvatar" value="${esc(user.avatar||'')}" placeholder="请输入头像图片URL"></div>
+                <button class="btn btn-primary btn-block" onclick="doUpdateProfile()" style="border-radius:22px;padding:12px">保存修改</button>
+            </div>
+        </div>`;
+        document.body.appendChild(overlay);
+    }).catch(e => showToast(e.message, 'error'));
+}
+
+async function doUpdateProfile() {
+    const data = {};
+    ['eNickname','ePhone','eSchool','eAvatar'].forEach(id => { const v = $('#' + id).value.trim(); if (v) data[id.replace('e','').toLowerCase()] = v; });
+    data.nickname = data.nickname || undefined; // fix key mapping
+    try {
+        const body = {};
+        const n = $('#eNickname').value.trim(); if (n) body.nickname = n;
+        const p = $('#ePhone').value.trim(); if (p) body.phone = p;
+        const s = $('#eSchool').value.trim(); if (s) body.school = s;
+        const a = $('#eAvatar').value.trim(); if (a) body.avatar = a;
+        await UserAPI.updateInfo(body);
+        removeModal();
+        showToast('修改成功', 'success');
+        loadProfile();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 发布商品 ==========
+function showPublishForm() {
+    const sub = $('#mineSubContent');
+    sub.innerHTML = `
+    <div class="form-section">
+        <h3 style="margin-bottom:16px;font-size:16px">发布闲置商品</h3>
+        <div class="form-group"><label class="form-label">商品标题 *</label><input class="form-input" id="pubTitle" placeholder="请输入商品标题"></div>
+        <div class="form-group"><label class="form-label">商品描述 *</label><textarea class="form-textarea" id="pubDesc" placeholder="请描述商品的成色、使用情况等"></textarea></div>
+        <div class="form-group"><label class="form-label">售价 *</label><input class="form-input" id="pubPrice" type="number" step="0.01" placeholder="如：2999.00"></div>
+        <div class="form-group"><label class="form-label">原价</label><input class="form-input" id="pubOrigPrice" type="number" step="0.01" placeholder="选填"></div>
+        <div class="form-group"><label class="form-label">图片 *（多个URL用英文逗号分隔）</label><input class="form-input" id="pubImages" placeholder="如：a.jpg,b.jpg,c.jpg"></div>
+        <div class="form-group"><label class="form-label">分类 *</label><select class="form-select" id="pubCatId"><option value="">请选择分类</option></select></div>
+        <button class="btn btn-primary btn-block" onclick="doPublish()" style="border-radius:22px;padding:12px">发布商品</button>
+    </div>`;
+    CategoryAPI.list().then(cats => {
+        const sel = $('#pubCatId');
+        cats.forEach(c => { sel.innerHTML += `<option value="${c.id}">${c.icon||''} ${c.name}</option>`; });
+    }).catch(() => {});
+}
+
+async function doPublish() {
+    const title = $('#pubTitle').value.trim();
+    const desc = $('#pubDesc').value.trim();
+    const price = $('#pubPrice').value.trim();
+    const orig = $('#pubOrigPrice').value.trim();
+    const images = $('#pubImages').value.trim();
+    const catId = $('#pubCatId').value;
+    if (!title || !desc || !price || !images || !catId) { showToast('请填写所有必填项', 'error'); return; }
+    const data = { title, description: desc, price: parseFloat(price), images, categoryId: parseInt(catId) };
+    if (orig) data.originalPrice = parseFloat(orig);
+    try {
+        await UserAPI.publish(data);
+        showToast('发布成功！', 'success');
+        $('#mineSubContent').innerHTML = '';
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 我的发布 ==========
+function showPublished() { publishedPage = 1; loadPublished(1); }
+
+async function loadPublished(page) {
+    try {
+        const result = await UserAPI.published(page, 10);
+        let html = '<div style="padding:16px"><h3 style="font-size:16px;margin-bottom:12px">我的发布</h3>';
+        if (!result.records.length) {
+            html += '<div class="empty-state"><div class="empty-icon">📦</div><div class="empty-text">暂无发布的商品</div></div>';
+        } else {
+            const sm = { 1: ['在售','status-1'], 2: ['已售','status-2'], 3: ['已下架','status-3'] };
+            result.records.forEach(p => {
+                const [st, cls] = sm[p.status] || ['未知',''];
+                const img = getFirstImage(p.images);
+                html += `<div class="published-item">
+                    ${img ? `<img src="${esc(img)}" style="width:70px;height:70px;border-radius:8px;object-fit:cover" onerror="this.style.display='none'" alt="">` : '<div style="width:70px;height:70px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#f0f4ff;font-size:24px">📦</div>'}
+                    <div style="flex:1;min-width:0">
+                        <div style="font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(p.title)}</div>
+                        <span class="published-status ${cls}">${st}</span>
+                        <span style="font-size:14px;font-weight:600;color:var(--danger);margin-left:6px">¥${fmt(p.price)}</span>
+                        ${p.status===1 ? `<div class="published-actions"><button class="btn btn-outline btn-sm" onclick="offShelf(${p.id})">下架</button></div>` : ''}
+                    </div>
+                </div>`;
+            });
+            if (result.total > result.size) {
+                const tp = Math.ceil(result.total / result.size);
+                html += `<div class="pagination"><button onclick="loadPublished(${page-1})" ${page<=1?'disabled':''}>上一页</button><span class="page-info">${page}/${tp}</span><button onclick="loadPublished(${page+1})" ${page>=tp?'disabled':''}>下一页</button></div>`;
+            }
+        }
+        html += '</div>';
+        $('#mineSubContent').innerHTML = html;
+        publishedPage = page;
+    } catch (e) { $('#mineSubContent').innerHTML = `<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-text">${esc(e.message)}</div></div>`; }
+}
+
+async function offShelf(productId) {
+    if (!confirm('确定下架该商品吗？')) return;
+    try { await UserAPI.offShelf(productId); showToast('已下架', 'success'); loadPublished(publishedPage); } catch (e) { showToast(e.message, 'error'); }
+}
+
+// ========== 我的订单 ==========
+function showOrders() {
+    orderStatus = null; orderPage = 1;
+    $('#mineSubContent').innerHTML = `
+    <div style="padding:16px"><h3 style="font-size:16px;margin-bottom:12px">我的订单</h3>
+        <div class="order-tabs">
+            <button class="order-tab active" data-status="">全部</button>
+            <button class="order-tab" data-status="1">待发货</button>
+            <button class="order-tab" data-status="2">待收货</button>
+            <button class="order-tab" data-status="3">已完成</button>
+            <button class="order-tab" data-status="4">已取消</button>
+        </div>
+        <div id="orderListContainer" style="margin-top:12px"></div>
+    </div>`;
+    $$('#mineSubContent .order-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('#mineSubContent .order-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            orderStatus = tab.dataset.status ? Number(tab.dataset.status) : null;
+            orderPage = 1;
+            loadOrders(1);
+        });
+    });
+    loadOrders(1);
+}
+
+async function loadOrders(page) {
+    try {
+        const result = await UserAPI.orders(orderStatus, page, 10);
+        const container = $('#orderListContainer');
+        if (!result.records.length) { container.innerHTML = '<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-text">暂无订单</div></div>'; return; }
+        const sm = { 1: ['待发货','status-1'], 2: ['待收货','status-2'], 3: ['已完成','status-3'], 4: ['已取消','status-4'] };
+        let html = result.records.map(o => {
+            const [st, cls] = sm[o.status] || ['未知',''];
+            return `<div class="order-card"><div class="order-no">订单号: ${esc(o.orderNo||'')} <span class="order-status ${cls}" style="float:right">${st}</span></div><div style="margin-top:8px;font-size:14px">💰 金额: <b style="color:var(--danger)">¥${fmt(o.totalAmount||0)}</b></div><div style="font-size:12px;color:var(--text-muted);margin-top:4px">🕐 ${esc(o.createTime||'')}</div></div>`;
+        }).join('');
+        if (result.total > result.size) {
+            const tp = Math.ceil(result.total / result.size);
+            html += `<div class="pagination"><button onclick="loadOrders(${page-1})" ${page<=1?'disabled':''}>上一页</button><span class="page-info">${page}/${tp}</span><button onclick="loadOrders(${page+1})" ${page>=tp?'disabled':''}>下一页</button></div>`;
+        }
+        container.innerHTML = html;
+        orderPage = page;
+    } catch (e) { $('#orderListContainer').innerHTML = `<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-text">${esc(e.message)}</div></div>`; }
+}
+
+function doLogout() { logout(); init(); }
+
+$('.tab-item').forEach(t => t.addEventListener('click', () => { showToast('请看其他模块文件'); }));
+
+init();
+</script>
+</body>
+</html>
