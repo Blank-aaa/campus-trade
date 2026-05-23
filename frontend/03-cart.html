@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>购物车 - 校园二手交易</title>
+    <link rel="stylesheet" href="common.css">
+</head>
+<body>
+
+    <header class="header">
+        <span class="header-title">购物车</span>
+    </header>
+
+    <div class="main-content">
+        <div class="product-list" style="padding-top:12px;padding-bottom:70px" id="cartList">
+            <div class="loading"><div class="spinner"></div>加载中...</div>
+        </div>
+        <div class="cart-footer" id="cartFooter" style="display:none">
+            <div class="cart-total">合计: <span class="price" id="cartTotalPrice">¥0.00</span></div>
+            <button class="btn btn-primary" id="checkoutBtn">立即结算</button>
+        </div>
+    </div>
+
+    <nav class="tab-bar">
+        <button class="tab-item" data-tab="home"><span class="tab-icon">🏠</span><span>首页</span></button>
+        <button class="tab-item" data-tab="category"><span class="tab-icon">📂</span><span>分类</span></button>
+        <button class="tab-item active" data-tab="cart"><span class="tab-icon tab-badge" id="cartBadge">🛒</span><span>购物车</span></button>
+        <button class="tab-item" data-tab="mine"><span class="tab-icon">👤</span><span>我的</span></button>
+    </nav>
+
+    <script src="common.js"></script>
+    <script>
+// ==================== 购物车模块 ====================
+let cartItems = [];
+
+function init() {
+    if (!isLoggedIn()) {
+        $('#cartList').innerHTML = `<div class="login-prompt"><div class="icon">🛒</div><div style="color:var(--text-secondary)">请先登录后查看购物车</div><button class="btn btn-primary" onclick="showLoginModal(init)">去登录</button></div>`;
+        $('#cartFooter').style.display = 'none';
+        return;
+    }
+    loadCart();
+}
+
+async function loadCart() {
+    try {
+        cartItems = await CartAPI.list();
+        renderCart();
+    } catch (e) {
+        $('#cartList').innerHTML = `<div class="empty-state"><div class="empty-icon">❌</div><div class="empty-text">${esc(e.message)}</div></div>`;
+        $('#cartFooter').style.display = 'none';
+    }
+}
+
+function renderCart() {
+    if (!cartItems.length) {
+        $('#cartList').innerHTML = '<div class="empty-state"><div class="empty-icon">🛒</div><div class="empty-text">购物车空空如也</div></div>';
+        $('#cartFooter').style.display = 'none';
+        return;
+    }
+    $('#cartList').innerHTML = cartItems.map(item => {
+        const img = item.image;
+        const imgHtml = img ? `<img class="cart-img" src="${esc(img)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" alt="">` : '';
+        const plHtml = !img ? '<div class="cart-img" style="display:flex;align-items:center;justify-content:center;font-size:24px;background:#f0f4ff">📦</div>' : '<div class="cart-img" style="display:none;align-items:center;justify-content:center;font-size:24px;background:#f0f4ff">📦</div>';
+        return `<div class="cart-item">
+            ${imgHtml}${plHtml}
+            <div class="cart-info">
+                <div class="cart-title">${esc(item.title)}</div>
+                <div class="cart-price">¥${fmt(item.price)}</div>
+                <div class="cart-qty">
+                    <button onclick="changeQty(${item.cartId}, ${item.quantity - 1})">−</button>
+                    <span class="qty-num">${item.quantity}</span>
+                    <button onclick="changeQty(${item.cartId}, ${item.quantity + 1})">+</button>
+                </div>
+            </div>
+            <button class="cart-delete" onclick="removeItem(${item.cartId})">🗑</button>
+        </div>`;
+    }).join('');
+    updateTotal();
+    $('#cartFooter').style.display = 'flex';
+}
+
+function updateTotal() {
+    let total = 0;
+    cartItems.forEach(item => { total += item.price * item.quantity; });
+    $('#cartTotalPrice').textContent = '¥' + fmt(total);
+}
+
+async function changeQty(cartId, newQty) {
+    if (newQty <= 0) { await removeItem(cartId); return; }
+    try {
+        await CartAPI.updateQty(cartId, newQty);
+        const item = cartItems.find(i => i.cartId == cartId);
+        if (item) item.quantity = newQty;
+        renderCart();
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function removeItem(cartId) {
+    try {
+        await CartAPI.remove(cartId);
+        cartItems = cartItems.filter(i => i.cartId != cartId);
+        renderCart();
+        showToast('已删除', 'success');
+    } catch (e) { showToast(e.message, 'error'); }
+}
+
+async function checkout() {
+    if (!cartItems.length) { showToast('购物车为空'); return; }
+    let success = 0;
+    for (const item of cartItems) {
+        try { await UserAPI.createOrder(item.productId, item.quantity); success++; } catch (e) { /* skip */ }
+    }
+    if (success > 0) {
+        showToast(`成功下单 ${success} 件商品`, 'success');
+        cartItems = [];
+        renderCart();
+    } else { showToast('下单失败', 'error'); }
+}
+
+$('#checkoutBtn').addEventListener('click', checkout);
+$('.tab-item').forEach(t => t.addEventListener('click', () => { showToast('请看其他模块文件'); }));
+
+init();
+</script>
+</body>
+</html>
